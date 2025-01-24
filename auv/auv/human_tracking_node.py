@@ -5,6 +5,7 @@ import rclpy
 from rclpy.node import Node
 import argparse
 
+
 class WebcamVideoStream:
     def __init__(self, src, width, height):
         self.width = width
@@ -42,8 +43,8 @@ class HumanTrackingNode(Node):
         self.get_logger().info('Human Tracking Node Started')
 
         # Load the pre-trained MobileNet SSD model
-        self.net = cv2.dnn.readNetFromCaffe('/home/rpiauv/ros_ws/src/auv/deploy.prototxt', '/home/rpiauv/ros_ws/src/auv/mobilenet_iter_73000.caffemodel')
-
+        self.net = cv2.dnn.readNetFromCaffe('/home/rpiauv-server/ros_ws/src/auv/deploy.prototxt',
+                                            '/home/rpiauv-server/ros_ws/src/auv/mobilenet_iter_73000.caffemodel')
 
         # Define the class labels MobileNet SSD was trained on
         self.CLASSES = ["background", "aeroplane", "bicycle", "bird", "boat",
@@ -53,6 +54,9 @@ class HumanTrackingNode(Node):
 
         # Initialize the video stream
         self.vs = WebcamVideoStream(src=0, width=self.width, height=self.height).start()
+
+        # Video writer for saving output (optional, enable if needed)
+        self.out = cv2.VideoWriter('output.avi', cv2.VideoWriter_fourcc(*'XVID'), 20.0, (self.width, self.height))
 
         self.timer = self.create_timer(0.03, self.track_humans)
 
@@ -80,7 +84,7 @@ class HumanTrackingNode(Node):
         for i in np.arange(0, detections.shape[2]):
             confidence = detections[0, 0, i, 2]
 
-            # Filter out weak detections by ensuring the confidence is greater than a threshold
+            # Filter out weak detections
             if confidence > 0.2:
                 idx = int(detections[0, 0, i, 1])
                 if self.CLASSES[idx] == "person":
@@ -104,29 +108,26 @@ class HumanTrackingNode(Node):
                     y = startY - 15 if startY - 15 > 15 else startY + 15
                     cv2.putText(frame, label, (startX, y), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
 
-                    # Draw error lines
-                    cv2.line(frame, (frame_center_x, frame_center_y), (pos_x, frame_center_y), (0, 0, 255), 1)  # X-axis (red)
-                    cv2.line(frame, (pos_x, pos_y), (pos_x, frame_center_y), (255, 0, 0), 1)  # Y-axis (blue)
+        # Write the frame to video file
+        self.out.write(frame)
 
-                    # Display error values on the frame
-                    cv2.putText(frame, f"X: {error_x}", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)  # Red text for X
-                    cv2.putText(frame, f"Y: {error_y}", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 0), 1)  # Blue text for Y
-
-        # Display the resulting frame
+        # Display the resulting frame if show_frame is True
         if self.show_frame:
             cv2.imshow('Frame', frame)
+            if cv2.waitKey(20) & 0xFF == ord('q'):
+                self.get_logger().info("Shutting down...")
+                self.vs.stop()
+                cv2.destroyAllWindows()
+                self.destroy_node()
 
-        # Break the loop on 'q' key press
-        if cv2.waitKey(20) & 0xFF == ord('q'):
-            self.get_logger().info("Shutting down...")
-            self.vs.stop()
-            cv2.destroyAllWindows()
-            self.destroy_node()
+    def stop(self):
+        self.vs.stop()
+        self.out.release()
 
 
 def main(args=None):
     rclpy.init(args=args)
-    
+
     # ใช้ argparse เพื่ออ่าน argument
     parser = argparse.ArgumentParser(description="Human Tracking Node")
     parser.add_argument('--hide', action='store_true', help="Hide the frame display")
@@ -137,9 +138,10 @@ def main(args=None):
     width, height = 320, 240  # กำหนดค่าของ width และ height
     node = HumanTrackingNode(width, height, show_frame=show_frame)
     rclpy.spin(node)
+    node.stop()
     rclpy.shutdown()
 
 
 if __name__ == '__main__':
+    import sys
     main(args=sys.argv[1:])
-
