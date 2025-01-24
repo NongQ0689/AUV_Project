@@ -34,17 +34,18 @@ class WebcamVideoStream:
 
 
 class HumanTrackingNode(Node):
-    def __init__(self, width, height, show_frame=True):
+    def __init__(self, width, height, show_frame=True, record_video=False):
         super().__init__('human_tracking')
 
         self.width = width
         self.height = height
-        self.show_frame = show_frame  # ถ้าเป็น True จะแสดงหน้าต่างภาพ
+        self.show_frame = show_frame
+        self.record_video = record_video  # ตรวจสอบว่าต้องบันทึกวิดีโอหรือไม่
         self.get_logger().info('Human Tracking Node Started')
 
         # Load the pre-trained MobileNet SSD model
-        self.net = cv2.dnn.readNetFromCaffe('/home/rpiauv-server/ros_ws/src/auv/deploy.prototxt',
-                                            '/home/rpiauv-server/ros_ws/src/auv/mobilenet_iter_73000.caffemodel')
+        self.net = cv2.dnn.readNetFromCaffe('/home/rpiauv/ros_ws/src/auv/deploy.prototxt',
+                                            '/home/rpiauv/ros_ws/src/auv/mobilenet_iter_73000.caffemodel')
 
         # Define the class labels MobileNet SSD was trained on
         self.CLASSES = ["background", "aeroplane", "bicycle", "bird", "boat",
@@ -55,8 +56,11 @@ class HumanTrackingNode(Node):
         # Initialize the video stream
         self.vs = WebcamVideoStream(src=0, width=self.width, height=self.height).start()
 
-        # Video writer for saving output (optional, enable if needed)
-        self.out = cv2.VideoWriter('output.avi', cv2.VideoWriter_fourcc(*'XVID'), 20.0, (self.width, self.height))
+        # Initialize video writer if record_video is True
+        if self.record_video:
+            self.out = cv2.VideoWriter('output.avi', cv2.VideoWriter_fourcc(*'XVID'), 20.0, (self.width, self.height))
+        else:
+            self.out = None
 
         self.timer = self.create_timer(0.03, self.track_humans)
 
@@ -76,9 +80,6 @@ class HumanTrackingNode(Node):
         # Frame center coordinates
         frame_center_x = self.width // 2
         frame_center_y = self.height // 2
-
-        # Draw the center point
-        cv2.circle(frame, (frame_center_x, frame_center_y), 5, (0, 255, 0), -1)  # Green dot
 
         # Loop over the detections
         for i in np.arange(0, detections.shape[2]):
@@ -105,13 +106,12 @@ class HumanTrackingNode(Node):
                     # Draw the bounding box
                     label = f"{self.CLASSES[idx]}: {confidence:.2f}"
                     cv2.rectangle(frame, (startX, startY), (endX, endY), (0, 255, 0), 2)
-                    y = startY - 15 if startY - 15 > 15 else startY + 15
-                    cv2.putText(frame, label, (startX, y), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
 
-        # Write the frame to video file
-        self.out.write(frame)
+        # Write frame to video file if recording is enabled
+        if self.record_video and self.out:
+            self.out.write(frame)
 
-        # Display the resulting frame if show_frame is True
+        # Display frame if show_frame is True
         if self.show_frame:
             cv2.imshow('Frame', frame)
             if cv2.waitKey(20) & 0xFF == ord('q'):
@@ -122,7 +122,8 @@ class HumanTrackingNode(Node):
 
     def stop(self):
         self.vs.stop()
-        self.out.release()
+        if self.out:
+            self.out.release()
 
 
 def main(args=None):
@@ -131,12 +132,14 @@ def main(args=None):
     # ใช้ argparse เพื่ออ่าน argument
     parser = argparse.ArgumentParser(description="Human Tracking Node")
     parser.add_argument('--hide', action='store_true', help="Hide the frame display")
+    parser.add_argument('--vdo', action='store_true', help="Record video to output.avi")
     parsed_args = parser.parse_args(args)
 
     show_frame = not parsed_args.hide  # ถ้าใส่ --hide จะไม่แสดงภาพ
+    record_video = parsed_args.vdo  # ถ้าใส่ --vdo จะบันทึกวิดีโอ
 
     width, height = 320, 240  # กำหนดค่าของ width และ height
-    node = HumanTrackingNode(width, height, show_frame=show_frame)
+    node = HumanTrackingNode(width, height, show_frame=show_frame, record_video=record_video)
     rclpy.spin(node)
     node.stop()
     rclpy.shutdown()
