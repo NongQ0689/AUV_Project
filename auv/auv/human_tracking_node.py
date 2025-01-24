@@ -4,7 +4,7 @@ from threading import Thread
 import rclpy
 from rclpy.node import Node
 import argparse
-
+import sys
 
 class WebcamVideoStream:
     def __init__(self, src, width, height):
@@ -34,18 +34,17 @@ class WebcamVideoStream:
 
 
 class HumanTrackingNode(Node):
-    def __init__(self, width, height, show_frame=True, record_video=False):
+    def __init__(self, width, height, show_frame=True, save_video=False):
         super().__init__('human_tracking')
 
         self.width = width
         self.height = height
         self.show_frame = show_frame
-        self.record_video = record_video  # ตรวจสอบว่าต้องบันทึกวิดีโอหรือไม่
+        self.save_video = save_video  # Boolean to control video recording
         self.get_logger().info('Human Tracking Node Started')
 
         # Load the pre-trained MobileNet SSD model
-        self.net = cv2.dnn.readNetFromCaffe('/home/rpiauv/ros_ws/src/auv/deploy.prototxt',
-                                            '/home/rpiauv/ros_ws/src/auv/mobilenet_iter_73000.caffemodel')
+        self.net = cv2.dnn.readNetFromCaffe('/home/rpiauv/ros_ws/src/auv/deploy.prototxt', '/home/rpiauv/ros_ws/src/auv/mobilenet_iter_73000.caffemodel')
 
         # Define the class labels MobileNet SSD was trained on
         self.CLASSES = ["background", "aeroplane", "bicycle", "bird", "boat",
@@ -56,11 +55,10 @@ class HumanTrackingNode(Node):
         # Initialize the video stream
         self.vs = WebcamVideoStream(src=0, width=self.width, height=self.height).start()
 
-        # Initialize video writer if record_video is True
-        if self.record_video:
-            self.out = cv2.VideoWriter('output.avi', cv2.VideoWriter_fourcc(*'XVID'), 20.0, (self.width, self.height))
-        else:
-            self.out = None
+        # Initialize video writer if saving video
+        if self.save_video:
+            fourcc = cv2.VideoWriter_fourcc(*'XVID')  # Codec for video
+            self.video_writer = cv2.VideoWriter('output.avi', fourcc, 20.0, (self.width, self.height))
 
         self.timer = self.create_timer(0.03, self.track_humans)
 
@@ -81,11 +79,14 @@ class HumanTrackingNode(Node):
         frame_center_x = self.width // 2
         frame_center_y = self.height // 2
 
+        # Draw the center point
+        cv2.circle(frame, (frame_center_x, frame_center_y), 5, (0, 255, 0), -1)  # Green dot
+
         # Loop over the detections
         for i in np.arange(0, detections.shape[2]):
             confidence = detections[0, 0, i, 2]
 
-            # Filter out weak detections
+            # Filter out weak detections by ensuring the confidence is greater than a threshold
             if confidence > 0.2:
                 idx = int(detections[0, 0, i, 1])
                 if self.CLASSES[idx] == "person":
@@ -106,45 +107,54 @@ class HumanTrackingNode(Node):
                     # Draw the bounding box
                     label = f"{self.CLASSES[idx]}: {confidence:.2f}"
                     cv2.rectangle(frame, (startX, startY), (endX, endY), (0, 255, 0), 2)
+                    y = startY - 15 if startY - 15 > 15 else startY + 15
+                    cv2.putText(frame, label, (startX, y), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
 
-        # Write frame to video file if recording is enabled
-        if self.record_video and self.out:
-            self.out.write(frame)
+                    # Draw error lines
+                    cv2.line(frame, (frame_center_x, frame_center_y), (pos_x, frame_center_y), (0, 0, 255), 1)  # X-axis (red)
+                    cv2.line(frame, (pos_x, pos_y), (pos_x, frame_center_y), (255, 0, 0), 1)  # Y-axis (blue)
 
-        # Display frame if show_frame is True
+                    # Display error values on the frame
+                    cv2.putText(frame, f"X: {error_x}", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)  # Red text for X
+                    cv2.putText(frame, f"Y: {error_y}", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 0), 1)  # Blue text for Y
+
+        # Display the resulting frame
         if self.show_frame:
             cv2.imshow('Frame', frame)
+
+            # If the 'q' key is pressed, stop the video stream and close the window
             if cv2.waitKey(20) & 0xFF == ord('q'):
                 self.get_logger().info("Shutting down...")
-                self.vs.stop()
-                cv2.destroyAllWindows()
-                self.destroy_node()
+                self.vs.stop()  # Stop video stream
+                cv2.destroyAllWindows()  # Close the window
+                self.destroy_node()  # Shutdown the ROS node
 
-    def stop(self):
-        self.vs.stop()
-        if self.out:
-            self.out.release()
+        # If we are saving video, write the frame to the video file
+        if self.save_video:
+            self.video_writer.write(frame)
+
+    def __del__(self):
+        if self.save_video:
+            self.video_writer.release()  # Release the video writer
 
 
 def main(args=None):
     rclpy.init(args=args)
-
-    # ใช้ argparse เพื่ออ่าน argument
+    
+    # Use argparse to read argument
     parser = argparse.ArgumentParser(description="Human Tracking Node")
     parser.add_argument('--hide', action='store_true', help="Hide the frame display")
-    parser.add_argument('--vdo', action='store_true', help="Record video to output.avi")
+    parser.add_argument('--vdo', action='store_true', help="Save and show the video")
     parsed_args = parser.parse_args(args)
 
-    show_frame = not parsed_args.hide  # ถ้าใส่ --hide จะไม่แสดงภาพ
-    record_video = parsed_args.vdo  # ถ้าใส่ --vdo จะบันทึกวิดีโอ
+    show_frame = not parsed_args.hide  # If --hide, will not display frame
+    save_video = parsed_args.vdo  # If --vdo, will save and show video
 
-    width, height = 320, 240  # กำหนดค่าของ width และ height
-    node = HumanTrackingNode(width, height, show_frame=show_frame, record_video=record_video)
+    width, height = 320, 240  # Set width and height
+    node = HumanTrackingNode(width, height, show_frame=show_frame, save_video=save_video)
     rclpy.spin(node)
-    node.stop()
     rclpy.shutdown()
 
 
 if __name__ == '__main__':
-    import sys
     main(args=sys.argv[1:])
