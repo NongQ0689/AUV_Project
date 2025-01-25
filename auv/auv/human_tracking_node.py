@@ -147,6 +147,7 @@ class HumanTrackingNode(Node):
         use_time = et-st
         print(use_time)
 
+    
     def __del__(self):
         if self.save_video:
             self.video_writer.release()  # Release the video writer
