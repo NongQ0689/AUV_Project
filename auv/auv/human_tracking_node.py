@@ -5,6 +5,7 @@ import rclpy
 from rclpy.node import Node
 import argparse
 import sys
+import time
 
 class WebcamVideoStream:
     def __init__(self, src, width, height):
@@ -44,7 +45,7 @@ class HumanTrackingNode(Node):
         self.get_logger().info('Human Tracking Node Started')
 
         # Load the pre-trained MobileNet SSD model
-        self.net = cv2.dnn.readNetFromCaffe('/home/rpiauv/ros_ws/src/auv/deploy.prototxt', '/home/rpiauv/ros_ws/src/auv/mobilenet_iter_73000.caffemodel')
+        self.net = cv2.dnn.readNetFromCaffe('/home/rpiauv-server/ros2_ws/src/auv/deploy.prototxt', '/home/rpiauv-server/ros2_ws/src/auv/mobilenet_iter_73000.caffemodel')
 
         # Define the class labels MobileNet SSD was trained on
         self.CLASSES = ["background", "aeroplane", "bicycle", "bird", "boat",
@@ -57,12 +58,13 @@ class HumanTrackingNode(Node):
 
         # Initialize video writer if saving video
         if self.save_video:
-            fourcc = cv2.VideoWriter_fourcc(*'XVID')  # Codec for video
-            self.video_writer = cv2.VideoWriter('output.avi', fourcc, 20.0, (self.width, self.height))
+            fourcc = cv2.VideoWriter_fourcc(*'MJPG')  # Codec for video
+            self.video_writer = cv2.VideoWriter('output.avi', fourcc, 10.0, (self.width, self.height))
 
-        self.timer = self.create_timer(0.03, self.track_humans)
+        self.timer = self.create_timer(0.1, self.track_humans)
 
     def track_humans(self):
+        st = time.time()
         frame = self.vs.read()
 
         if frame is None:
@@ -80,7 +82,9 @@ class HumanTrackingNode(Node):
         frame_center_y = self.height // 2
 
         # Draw the center point
-        cv2.circle(frame, (frame_center_x, frame_center_y), 5, (0, 255, 0), -1)  # Green dot
+        cv2.circle(frame, (frame_center_x, frame_center_y), 3, (0, 255, 0), -1)  # Green dot
+
+        person_detected = False  # Initialize person detection flag
 
         # Loop over the detections
         for i in np.arange(0, detections.shape[2]):
@@ -90,6 +94,8 @@ class HumanTrackingNode(Node):
             if confidence > 0.2:
                 idx = int(detections[0, 0, i, 1])
                 if self.CLASSES[idx] == "person":
+                    person_detected = True
+
                     box = detections[0, 0, i, 3:7] * np.array([self.width, self.height, self.width, self.height])
                     (startX, startY, endX, endY) = box.astype("int")
 
@@ -118,6 +124,11 @@ class HumanTrackingNode(Node):
                     cv2.putText(frame, f"X: {error_x}", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)  # Red text for X
                     cv2.putText(frame, f"Y: {error_y}", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 0), 1)  # Blue text for Y
 
+        if not person_detected:
+            self.get_logger().info(
+                f"w:{self.width} - h:{self.height} | No person detected! |"
+            )
+
         # Display the resulting frame
         if self.show_frame:
             cv2.imshow('Frame', frame)
@@ -132,6 +143,9 @@ class HumanTrackingNode(Node):
         # If we are saving video, write the frame to the video file
         if self.save_video:
             self.video_writer.write(frame)
+        et = time.time()
+        use_time = et-st
+        print(use_time)
 
     def __del__(self):
         if self.save_video:
@@ -149,6 +163,8 @@ def main(args=None):
 
     show_frame = not parsed_args.hide  # If --hide, will not display frame
     save_video = parsed_args.vdo  # If --vdo, will save and show video
+
+    print(f"show_frame:{show_frame} | save_video:{save_video}")
 
     width, height = 320, 240  # Set width and height
     node = HumanTrackingNode(width, height, show_frame=show_frame, save_video=save_video)
