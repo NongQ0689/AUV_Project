@@ -58,8 +58,10 @@ class HumanTrackingNode(Node):
 
         # Initialize video writer if saving video
         if self.save_video:
+            current_time = str(int(time.time()))
+            filename = f'output_{current_time}.avi'
             fourcc = cv2.VideoWriter_fourcc(*'MJPG')  # Codec for video
-            self.video_writer = cv2.VideoWriter('output.avi', fourcc, 10.0, (self.width, self.height))
+            self.video_writer = cv2.VideoWriter(filename, fourcc, 10.0, (self.width, self.height))
 
         self.timer = self.create_timer(0.1, self.track_humans)
 
