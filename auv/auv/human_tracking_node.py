@@ -145,9 +145,10 @@ class HumanTrackingNode(Node):
         # If we are saving video, write the frame to the video file
         if self.save_video:
             self.video_writer.write(frame)
+            
         et = time.time()
         use_time = et-st
-        print(use_time)
+        print(f'use_time:{use_time} | {1/use_time}fps)
 
     
     def __del__(self):
