@@ -148,7 +148,7 @@ class HumanTrackingNode(Node):
             
         et = time.time()
         use_time = et-st
-        print(f'use_time:{use_time} | {1/use_time}fps)
+        print(f'use_time:{use_time} | {1/use_time}fps')
 
     
     def __del__(self):
